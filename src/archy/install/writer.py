@@ -64,9 +64,19 @@ class WriteSystem(Protocol):
 
 def _read_text(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
+    except UnicodeDecodeError as error:
+        raise InstallError(
+            f"{path}: not valid UTF-8 ({error.reason} at byte {error.start}); "
+            "archy will not edit it"
+        ) from error
+    except PermissionError as error:
+        raise InstallError(f"{path}: cannot read ({error})") from error
+    if text.startswith("﻿"):
+        raise InstallError(f"{path}: starts with a UTF-8 BOM; archy will not edit it")
+    return text
 
 
 @dataclass
