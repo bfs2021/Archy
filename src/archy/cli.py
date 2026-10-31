@@ -699,6 +699,12 @@ def hotspots(path: Path, top_n: int, since: str | None, fmt: str) -> None:
             f"{path} is not inside a git repository (or git is unavailable); "
             "`archy hotspots` needs git history to compute per-file churn."
         )
+    if not churn:
+        scope = f" since {since}" if since else " yet"
+        raise click.ClickException(
+            f"{path} has no commit history{scope}; `archy hotspots` needs git "
+            "history to compute per-file churn."
+        )
     rows = compute_hotspots(g, churn=churn)
     if fmt == "json":
         payload = _hotspots_to_dict(rows, top_n=top_n, since=since)
@@ -957,6 +963,7 @@ def what_to_refactor_next(
     _require(0.0 <= min_risk <= 1.0, "min-risk", "in [0, 1]", min_risk)
     g = _load_graph(path, internal_only=True)
     churn = git_churn(path, since=since)
+    has_history = bool(churn)
     rows = compute_refactor_priorities(g, churn=churn, min_risk=min_risk)
     if fmt == "json":
         payload = _refactor_to_dict(
@@ -965,11 +972,18 @@ def what_to_refactor_next(
             since=since,
             min_risk=min_risk,
             git_available=churn is not None,
+            has_history=has_history,
         )
         click.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         click.echo(
-            _refactor_to_text(rows, top_n=top_n, min_risk=min_risk, git_available=churn is not None)
+            _refactor_to_text(
+                rows,
+                top_n=top_n,
+                min_risk=min_risk,
+                git_available=churn is not None,
+                has_history=has_history,
+            )
         )
 
 
@@ -3201,7 +3215,11 @@ def _duplicates_to_text(rows: list[DuplicateGroup], *, top_n: int, min_nodes: in
 
 
 def _refactor_note(
-    rows: list[RefactorPriority], *, min_risk: float, git_available: bool
+    rows: list[RefactorPriority],
+    *,
+    min_risk: float,
+    git_available: bool,
+    has_history: bool,
 ) -> str | None:
     """Machine-readable explanation for the empty / git-absent cases.
 
@@ -3209,17 +3227,24 @@ def _refactor_note(
     the same "nothing to prioritize" / "structural-only" signal rather than
     leaving the caller to infer it from an empty list."""
     if not rows:
-        if git_available:
+        if not git_available:
             return (
-                "No refactoring priorities surfaced: no file is both complex "
-                "and frequently changed, and no module is central and fragile "
-                f"above min_risk={min_risk}. Lower min_risk to widen the "
-                "structural lens."
+                "Not a git repository, so the CC x churn lens was skipped and only "
+                f"the structural lens ran; no module is central and fragile above "
+                f"min_risk={min_risk}. Lower min_risk to widen the structural lens."
+            )
+        if not has_history:
+            return (
+                "No commit history yet, so the CC x churn lens had nothing to "
+                "rank; no module is central and fragile above "
+                f"min_risk={min_risk}. Make an initial commit to enable the "
+                "behavioral lens, or lower min_risk to widen the structural lens."
             )
         return (
-            "Not a git repository, so the CC x churn lens was skipped and only "
-            f"the structural lens ran; no module is central and fragile above "
-            f"min_risk={min_risk}. Lower min_risk to widen the structural lens."
+            "No refactoring priorities surfaced: no file is both complex "
+            "and frequently changed, and no module is central and fragile "
+            f"above min_risk={min_risk}. Lower min_risk to widen the "
+            "structural lens."
         )
     if not git_available:
         return (
@@ -3236,6 +3261,7 @@ def _refactor_to_dict(
     since: str | None,
     min_risk: float,
     git_available: bool,
+    has_history: bool,
 ) -> dict:
     return {
         "since": since,
@@ -3244,7 +3270,9 @@ def _refactor_to_dict(
         "total": len(rows),
         "shown": min(top_n, len(rows)),
         "priorities": [r.model_dump() for r in rows[:top_n]],
-        "note": _refactor_note(rows, min_risk=min_risk, git_available=git_available),
+        "note": _refactor_note(
+            rows, min_risk=min_risk, git_available=git_available, has_history=has_history
+        ),
     }
 
 
@@ -3254,16 +3282,23 @@ def _refactor_to_text(
     top_n: int,
     min_risk: float,
     git_available: bool,
+    has_history: bool,
 ) -> str:
     if not rows:
-        if git_available:
+        if not git_available:
             return (
-                "# Nothing to refactor: no file is both complex and churned, and "
-                f"no module is central+fragile above min_risk={min_risk}."
+                "# Not a git repo, so only the structural lens ran; no module is "
+                f"central+fragile above min_risk={min_risk}. Nothing surfaced."
+            )
+        if not has_history:
+            return (
+                "# No commit history yet, so the CC x churn lens had nothing to "
+                f"rank; no module is central+fragile above min_risk={min_risk}. "
+                "Nothing surfaced."
             )
         return (
-            "# Not a git repo, so only the structural lens ran; no module is "
-            f"central+fragile above min_risk={min_risk}. Nothing surfaced."
+            "# Nothing to refactor: no file is both complex and churned, and "
+            f"no module is central+fragile above min_risk={min_risk}."
         )
     shown = rows[:top_n]
     header = f"# {len(rows)} refactor candidate(s); showing top {len(shown)}"

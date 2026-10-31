@@ -1975,6 +1975,7 @@ def _refactor_note(
     lens: str,
     rows: list,
     git_available: bool,
+    has_history: bool,
     path: Path,
     min_risk: float,
 ) -> str | None:
@@ -1999,6 +2000,13 @@ def _refactor_note(
                 "Use lens='structural' for a git-free 'is this edit dangerous?' "
                 "signal instead."
             )
+        if not has_history:
+            return (
+                f"{path} has no commit history yet; the behavioral lens needs "
+                "git history to compute per-file churn. Make an initial commit, "
+                "or use lens='structural' for a git-free 'is this edit "
+                "dangerous?' signal instead."
+            )
         return (
             "No behavioral hotspots surfaced: no file is both complex and "
             "frequently changed (CC x churn). The project is likely small, "
@@ -2011,6 +2019,14 @@ def _refactor_note(
         )
     # fused: the only lens left once behavioral and structural have returned
     if git_available:
+        if not has_history:
+            return (
+                f"{path} has no commit history yet, so the CC x churn behavioral "
+                "lens had nothing to rank; no module is central and fragile "
+                f"above min_risk={min_risk}. Make an initial commit to enable "
+                "the behavioral lens, or lower min_risk to widen the structural "
+                "lens."
+            )
         return (
             "No refactoring priorities surfaced: no file is both complex and "
             "frequently changed (CC x churn hotspots: 0), and no module is "
@@ -2042,6 +2058,7 @@ def _run_what_to_refactor_next(
     # git call entirely for structural (since is irrelevant there).
     churn = None if lens == "structural" else git_churn(path, since=since)
     git_available = churn is not None
+    has_history = bool(churn)
 
     rows = compute_refactor_priorities(graph, churn=churn, min_risk=min_risk)
     if lens == "behavioral":
@@ -2078,6 +2095,7 @@ def _run_what_to_refactor_next(
         lens=lens,
         rows=rows,
         git_available=git_available,
+        has_history=has_history,
         path=path,
         min_risk=min_risk,
     )

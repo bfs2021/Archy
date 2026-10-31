@@ -2111,3 +2111,20 @@ def test_check_transitive_checked_needs_a_verdict_not_a_request(tmp_path: Path, 
     # Names the real cause, not the flag the caller already passed and watched fail.
     assert "import-linter is not installed" in reason
     assert "produced no transitive verdict" in reason
+
+
+def test_refactor_fused_lens_no_commits_note(tmp_path: Path):
+    """Regression for #648: a fresh `git init` has git but no history, so the
+    note must point at the missing commit history, not the missing repo."""
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "init", "-q", "-b", "main"],
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x = 1\n")
+
+    payload = _run_what_to_refactor_next(tmp_path, lens="fused", top_n=5, since=None, min_risk=0.0)
+    assert payload.git_available is True
+    assert payload.note is not None
+    assert "no commit history" in payload.note
+    assert "not inside a git repository" not in payload.note

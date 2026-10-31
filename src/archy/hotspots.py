@@ -70,7 +70,9 @@ def git_churn(root: Path, *, since: str | None = None) -> dict[str, int] | None:
     graph's per-node ``path`` attribute without worrying about
     working-directory or repo-root differences. Returns ``None`` if
     ``root`` isn't inside a git repository or git isn't available;
-    returns ``{}`` for an empty (or fully-filtered) history.
+    returns ``{}`` for an empty (or fully-filtered) history — including a
+    fresh ``git init`` with no commits yet, so callers can tell "no commit
+    history" apart from "not a repository".
 
     Renamed files keep their full history: a ``git mv`` splits a file's
     commits across the old and new path, so rename (``R``) status lines
@@ -92,7 +94,13 @@ def git_churn(root: Path, *, since: str | None = None) -> dict[str, int] | None:
         log_proc = subprocess.run(
             cmd, capture_output=True, text=True, errors="surrogateescape", check=True
         )
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as exc:
+        # A fresh `git init` has no commits, so `git log` exits 128 with
+        # "does not have any commits yet". That is an empty history, not a
+        # missing repository: return {} so callers say "no commit history
+        # yet" instead of "not inside a git repository".
+        if exc.stderr and "does not have any commits yet" in exc.stderr:
+            return {}
         return None
 
     raw_counts: Counter[str] = Counter()

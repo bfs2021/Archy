@@ -217,3 +217,33 @@ def test_cli_hotspots_top_limits_rows(tmp_path: Path):
     assert result.exit_code == 0, result.output
     payload = _json.loads(result.output)
     assert len(payload["hotspots"]) <= 1
+
+
+def test_git_churn_returns_empty_for_repo_without_commits(tmp_path: Path):
+    """A fresh `git init` is an empty history ({}), not a missing repo (None)."""
+    repo = tmp_path
+    _init_repo(repo)
+    assert git_churn(repo) == {}
+
+
+def test_hotspots_no_commits_names_history(tmp_path: Path):
+    """Regression for #648: hotspots on a fresh `git init` must say "no commit
+    history", not send the user off to debug a missing git repository."""
+    repo = tmp_path
+    _init_repo(repo)
+    (repo / "a.py").write_text("x = 1\n")
+    result = CliRunner().invoke(main, ["hotspots", str(repo)])
+    assert result.exit_code != 0
+    assert "no commit history" in result.output
+    assert "not inside a git repository" not in result.output
+
+
+def test_what_to_refactor_next_no_commits_note(tmp_path: Path):
+    """Regression for #648: the note must mention commit history, not git."""
+    repo = tmp_path
+    _init_repo(repo)
+    (repo / "a.py").write_text("x = 1\n")
+    result = CliRunner().invoke(main, ["what-to-refactor-next", str(repo)])
+    assert result.exit_code == 0
+    assert "commit history" in result.output.lower()
+    assert "not a git repo" not in result.output.lower()
